@@ -2,7 +2,9 @@
 #include <ieee754.h>
 #include <math.h>
 
+/* synchronization */
 struct sem_s *adc_mtx;
+struct pipe_s *luminosity_pipe_from_adc, *luminosity_pipe_to_pwm, *temperature_pipe_from_adc, *temperature_pipe_to_pwm;
 
 /* ADC library */
 void analog_config();
@@ -157,14 +159,22 @@ float luminosity()
 }
 
 /* application threads */
-void idle(void)
+void task_head(void)
 {
+	char data_luminosity[64];
+
 	while (1) {
+		while(ucx_pipe_size(luminosity_pipe_from_adc) < 1);
+
+		ucx_pipe_read(luminosity_pipe_from_adc, data_luminosity, ucx_pipe_size(luminosity_pipe_from_adc));
+		printf("Luminosity pipe from adc: %s\n", data_luminosity);
+
+		ucx_pipe_write(luminosity_pipe_to_pwm, data_luminosity, strlen((char *) data_luminosity) + 1);		
 	}
 }
 
 /* ADC - Temperature */
-void task_a(void)
+void task_temperature_adc(void)
 {
 	float f;
 	char fval[50];
@@ -184,17 +194,21 @@ void task_a(void)
 }
 
 /* ADC - Luminosity */
-void task_b(void)
+void task_luminosity_adc(void)
 {
 	float f;
 	char fval[50];
-	
+	char data[64];
+
 	while (1) {
 		/* critical section: ADC is shared! */
 		ucx_sem_wait(adc_mtx);
 		adc_channel(ADC_Channel_9);
 		f = luminosity();
 		ucx_sem_signal(adc_mtx);
+		
+		ftoa(f, data, 6);
+		ucx_pipe_write(luminosity_pipe_from_adc, data, strlen((char *) data) + 1);
 		
 		ftoa(f, fval, 6);
 		printf("lux: %s\n", fval);
@@ -204,7 +218,7 @@ void task_b(void)
 }
 
 /* PWM - Temperature LED  */
-void task_c(void)
+void task_temperature_pwm(void)
 {
 	int duty = 0;
 	
@@ -225,20 +239,21 @@ void task_c(void)
 	}
 }
 
-/* PWM - Dimmer LED */
-void task_d(void)
+/* PWM - Luminosity LED */
+void task_luminosity_pwm(void)
 {
-	while (1) {	
-		TIM5->CCR2 = 0;
-		ucx_task_delay(50);
-		TIM5->CCR2 = 250;
-		ucx_task_delay(50);
-		TIM5->CCR2 = 500;
-		ucx_task_delay(50);
-		TIM5->CCR2 = 750;
-		ucx_task_delay(50);
-		TIM5->CCR2 = 999;
-		ucx_task_delay(50);
+	char data[64];
+	float luminosity;
+
+	while (1) {
+		while(ucx_pipe_size(luminosity_pipe_to_pwm) < 1);
+
+		ucx_pipe_read(luminosity_pipe_to_pwm, data, ucx_pipe_size(luminosity_pipe_to_pwm));
+		
+		luminosity = (1 - (atof(data) / 100)) * 1000;
+		if(luminosity <= 100) TIM5->CCR2 = 0;
+		else if(luminosity >= 900) TIM5->CCR2 = 999;
+		else TIM5->CCR2 = luminosity;
 	}
 }
 
@@ -248,17 +263,18 @@ int32_t app_main(void)
 	analog_config();
 	adc_config();
 	pwm_config();
-
-	ucx_task_add(idle, DEFAULT_STACK_SIZE);
-	ucx_task_add(task_a, DEFAULT_STACK_SIZE);
-	ucx_task_add(task_b, DEFAULT_STACK_SIZE);
-	ucx_task_add(task_c, DEFAULT_STACK_SIZE);
-	ucx_task_add(task_d, DEFAULT_STACK_SIZE);
-
-	/* ADC mutex */
+	
 	adc_mtx = ucx_sem_create(5, 1);
 
-	// start UCX/OS
+	luminosity_pipe_from_adc = ucx_pipe_create(64);
+	luminosity_pipe_to_pwm = ucx_pipe_create(64);
+	
+	ucx_task_add(task_head, DEFAULT_STACK_SIZE);
+	ucx_task_add(task_temperature_adc, DEFAULT_STACK_SIZE);
+	ucx_task_add(task_luminosity_adc, DEFAULT_STACK_SIZE);
+	ucx_task_add(task_temperature_pwm, DEFAULT_STACK_SIZE);
+	ucx_task_add(task_luminosity_pwm, DEFAULT_STACK_SIZE);	
+
 	return 1;
 }
 
