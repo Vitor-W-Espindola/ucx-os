@@ -171,6 +171,10 @@ scall_suspend: rebuild
 	$(CC) $(CFLAGS) -o $(BUILD_APP_DIR)/scall_suspend.o app/scall_suspend.c
 	@$(MAKE) --no-print-directory link
 
+actuator: rebuild
+	$(CC) $(CFLAGS) -o $(BUILD_APP_DIR)/actuator.o app/actuator.c
+	@$(MAKE) --no-print-directory link
+
 # clean and rebuild rules
 rebuild:
 	find '$(BUILD_APP_DIR)' -type f -name '*.o' -delete
