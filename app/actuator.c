@@ -166,23 +166,20 @@ char data_temperature[64];
 /* application threads */
 void task_head(void)
 {
-    while (1) {
-        /* Waiting for data from ADC tasks */
+    while (1) {	
+	/* Luminosity Reading and Writing */
         ucx_sem_wait(luminosity_sem_adc);
-
-        /* Critical section */
-        ucx_sem_wait(pwm_mtx);
-
-        ucx_sem_signal(luminosity_sem_pwm);
-        ucx_sem_signal(pwm_mtx);
-
-        ucx_sem_wait(temperature_sem_adc);
-		
-        /* Critical section */
-        ucx_sem_wait(pwm_mtx);
         
+	// ucx_sem_wait(pwm_mtx); // TODO: Is this needed here? Cuz there is already wait/signal calls inside the pwm functions.
+        ucx_sem_signal(luminosity_sem_pwm);
+        // ucx_sem_signal(pwm_mtx);
+
+	/* Temperature Reading and Writing */
+        ucx_sem_wait(temperature_sem_adc);
+        
+	// ucx_sem_wait(pwm_mtx);
         ucx_sem_signal(temperature_sem_pwm);
-        ucx_sem_signal(pwm_mtx);
+        // ucx_sem_signal(pwm_mtx);
     }
 }
 
@@ -283,10 +280,10 @@ int32_t app_main(void)
     adc_config();
     pwm_config();
 
-    adc_mtx = ucx_sem_create(5, 1); // Why?
+    adc_mtx = ucx_sem_create(5, 1);
     pwm_mtx = ucx_sem_create(5, 1);
 
-    luminosity_sem_adc = ucx_sem_create(10, 0); // Or ucx_sem_create(1,0)? Or ucx_sem_create(5,0)? 
+    luminosity_sem_adc = ucx_sem_create(10, 0); 
     luminosity_sem_pwm = ucx_sem_create(10, 0);
     temperature_sem_adc = ucx_sem_create(10, 0);
     temperature_sem_pwm = ucx_sem_create(10, 0);
