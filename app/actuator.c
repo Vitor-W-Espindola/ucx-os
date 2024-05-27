@@ -5,7 +5,7 @@
 /* synchronization */
 struct sem_s *adc_mtx;
 struct sem_s *pwm_mtx;
-struct pipe_s *luminosity_pipe_from_adc, *luminosity_pipe_to_pwm, *temperature_pipe_from_adc, *temperature_pipe_to_pwm;
+struct sem_s *luminosity_sem_adc, *luminosity_sem_pwm, *temperature_sem_adc, *temperature_sem_pwm;
 
 /* ADC library */
 void analog_config();
@@ -159,148 +159,143 @@ float luminosity()
 	return (lux / ADC_SAMPLES);
 }
 
+/* shared data */
+char data_luminosity[64];
+char data_temperature[64];
+
 /* application threads */
 void task_head(void)
 {
-	char data_luminosity[64];
-	char data_temperature[64];
+    while (1) {
+        /* Waiting for data from ADC tasks */
+        ucx_sem_wait(luminosity_sem_adc);
 
-	while (1) {
-		if(ucx_pipe_size(luminosity_pipe_from_adc) > 0) {
-			ucx_pipe_read(luminosity_pipe_from_adc, data_luminosity, ucx_pipe_size(luminosity_pipe_from_adc));
+        /* Critical section */
+        ucx_sem_wait(pwm_mtx);
 
-			ucx_pipe_write(luminosity_pipe_to_pwm, data_luminosity, strlen((char *) data_luminosity) + 1);
+        ucx_sem_signal(luminosity_sem_pwm);
+        ucx_sem_signal(pwm_mtx);
 
-		};
-		if(ucx_pipe_size(temperature_pipe_from_adc) > 0) {
-			ucx_pipe_read(temperature_pipe_from_adc, data_temperature, ucx_pipe_size(temperature_pipe_from_adc));
-
-			ucx_pipe_write(temperature_pipe_to_pwm, data_temperature, strlen((char *) data_temperature) + 1);
+        ucx_sem_wait(temperature_sem_adc);
 		
-		}
-	}	
+        /* Critical section */
+        ucx_sem_wait(pwm_mtx);
+        
+        ucx_sem_signal(temperature_sem_pwm);
+        ucx_sem_signal(pwm_mtx);
+    }
 }
 
 /* ADC - Temperature */
 void task_temperature_adc(void)
 {
-	float f;
-	char fval[50];
-	char data[64];
-	
-	while (1) {
-		/* critical section: ADC is shared! */
-		ucx_sem_wait(adc_mtx);
-		adc_channel(ADC_Channel_8);
-		f = temperature();
-		ucx_sem_signal(adc_mtx);
-	
-		ftoa(f, data, 6);
-		ucx_pipe_write(temperature_pipe_from_adc, data, strlen((char *) data) + 1);
+    float f;
+    char fval[50];
 
-		ftoa(f, fval, 6);
-		printf("temp: %s\n", fval);
-		
-		ucx_task_delay(capture_delay_us);
-	}
+    while (1) {
+        /* critical section: ADC is shared! */
+        ucx_sem_wait(adc_mtx);
+        adc_channel(ADC_Channel_8);
+        f = temperature();
+        ucx_sem_signal(adc_mtx);
+
+        ftoa(f, data_temperature, 6);
+        ucx_sem_signal(temperature_sem_adc); 
+
+        ftoa(f, fval, 6);
+        printf("temp: %s\n", fval);
+
+        ucx_task_delay(capture_delay_us);
+    }
 }
 
 /* ADC - Luminosity */
 void task_luminosity_adc(void)
 {
-	float f;
-	char fval[50];
-	char data[64];
+    float f;
+    char fval[50];
 
-	while (1) {
-		/* critical section: ADC is shared! */
-		ucx_sem_wait(adc_mtx);
-		adc_channel(ADC_Channel_9);
-		f = luminosity();
-		ucx_sem_signal(adc_mtx);
-		
-		ftoa(f, data, 6);
-		ucx_pipe_write(luminosity_pipe_from_adc, data, strlen((char *) data) + 1);
-		
-		ftoa(f, fval, 6);
-		printf("lux: %s\n", fval);
+    while (1) {
+        /* critical section: ADC is shared! */
+        ucx_sem_wait(adc_mtx);
+        adc_channel(ADC_Channel_9);
+        f = luminosity();
+        ucx_sem_signal(adc_mtx);
 
-		ucx_task_delay(capture_delay_us);
-	}
+        ftoa(f, data_luminosity, 6);
+        ucx_sem_signal(luminosity_sem_adc); 
+
+        ftoa(f, fval, 6);
+        printf("lux: %s\n", fval);
+
+        ucx_task_delay(capture_delay_us);
+    }
 }
 
-/* PWM - Temperature LED  */
+/* PWM - Temperature LED */
 void task_temperature_pwm(void)
 {
-	char data[64];
-	char temperature_val[50];
-	float temperature = 0.0;
-	
-	while (1) {
-		while(ucx_pipe_size(temperature_pipe_to_pwm) < 1);
+    char temperature_val[50];
+    float temperature = 0.0;
 
-		ucx_pipe_read(temperature_pipe_to_pwm, data, ucx_pipe_size(temperature_pipe_to_pwm));
-		
-		temperature = (atof(data) / 40) * 1000;
-		
-		ftoa(temperature, temperature_val, 6);
-		printf("temperature: %s\n", temperature_val);
-		
-		ucx_sem_wait(pwm_mtx);
-		if(temperature <= 0) TIM5->CCR1 = 0;
-		else if(temperature >= 999) TIM5->CCR1 = 999;
-		else TIM5->CCR1 = temperature;
-		ucx_sem_signal(pwm_mtx);
-	}
+    while (1) {
+        /* Waiting for data from head task */
+        ucx_sem_wait(temperature_sem_pwm);
+        temperature = (atof(data_temperature) / 40) * 1000;
+
+        ftoa(temperature, temperature_val, 6);
+        printf("temperature: %s\n", temperature_val);
+
+        ucx_sem_wait(pwm_mtx);
+        if (temperature <= 0) TIM5->CCR1 = 0;
+        else if (temperature >= 999) TIM5->CCR1 = 999;
+        else TIM5->CCR1 = temperature;
+        ucx_sem_signal(pwm_mtx);
+    }
 }
 
 /* PWM - Luminosity LED */
 void task_luminosity_pwm(void)
 {
-	char data[64];
-	char luminosity_val[50];
-	float luminosity = 0.0;
+    char luminosity_val[50];
+    float luminosity = 0.0;
 
-	while (1) {
-		while(ucx_pipe_size(luminosity_pipe_to_pwm) < 1);
+    while (1) {
+        /* Waiting for data from head task */
+        ucx_sem_wait(luminosity_sem_pwm);
+        luminosity = (1 - (atof(data_luminosity) / 100)) * 1000;
 
-		ucx_pipe_read(luminosity_pipe_to_pwm, data, ucx_pipe_size(luminosity_pipe_to_pwm));
-		
-		ucx_sem_wait(pwm_mtx);
-		
-		luminosity = (1 - (atof(data) / 100)) * 1000;
-		
-		ftoa(luminosity, luminosity_val, 6);
-		printf("luminosity: %s\n", luminosity_val);
+        ftoa(luminosity, luminosity_val, 6);
+        printf("luminosity: %s\n", luminosity_val);
 
-		if(luminosity <= 100) TIM5->CCR2 = 0;
-		else if(luminosity >= 900) TIM5->CCR2 = 999;
-		else TIM5->CCR2 = luminosity;
-		ucx_sem_signal(pwm_mtx);		
-	}
+        ucx_sem_wait(pwm_mtx);
+        if (luminosity <= 100) TIM5->CCR2 = 0;
+        else if (luminosity >= 900) TIM5->CCR2 = 999;
+        else TIM5->CCR2 = luminosity;
+        ucx_sem_signal(pwm_mtx);
+    }
 }
 
 /* main application entry point */
 int32_t app_main(void)
 {
-	analog_config();
-	adc_config();
-	pwm_config();
-	
-	adc_mtx = ucx_sem_create(5, 1);
-	pwm_mtx = ucx_sem_create(5, 1);
+    analog_config();
+    adc_config();
+    pwm_config();
 
-	luminosity_pipe_from_adc = ucx_pipe_create(64);
-	luminosity_pipe_to_pwm = ucx_pipe_create(64);
-	temperature_pipe_from_adc = ucx_pipe_create(64);
-	temperature_pipe_to_pwm = ucx_pipe_create(64);
+    adc_mtx = ucx_sem_create(5, 1); // Why?
+    pwm_mtx = ucx_sem_create(5, 1);
 
-	ucx_task_add(task_head, DEFAULT_STACK_SIZE);
-	ucx_task_add(task_temperature_adc, DEFAULT_STACK_SIZE);
-	ucx_task_add(task_luminosity_adc, DEFAULT_STACK_SIZE);
-	ucx_task_add(task_temperature_pwm, DEFAULT_STACK_SIZE);
-	ucx_task_add(task_luminosity_pwm, DEFAULT_STACK_SIZE);	
+    luminosity_sem_adc = ucx_sem_create(10, 0); // Or ucx_sem_create(1,0)? Or ucx_sem_create(5,0)? 
+    luminosity_sem_pwm = ucx_sem_create(10, 0);
+    temperature_sem_adc = ucx_sem_create(10, 0);
+    temperature_sem_pwm = ucx_sem_create(10, 0);
 
-	return 1;
+    ucx_task_add(task_head, DEFAULT_STACK_SIZE);
+    ucx_task_add(task_temperature_adc, DEFAULT_STACK_SIZE);
+    ucx_task_add(task_luminosity_adc, DEFAULT_STACK_SIZE);
+    ucx_task_add(task_temperature_pwm, DEFAULT_STACK_SIZE);
+    ucx_task_add(task_luminosity_pwm, DEFAULT_STACK_SIZE);
+
+    return 1;
 }
-
