@@ -171,8 +171,12 @@ scall_suspend: rebuild
 	$(CC) $(CFLAGS) -o $(BUILD_APP_DIR)/scall_suspend.o app/scall_suspend.c
 	@$(MAKE) --no-print-directory link
 
-actuator: rebuild
-	$(CC) $(CFLAGS) -o $(BUILD_APP_DIR)/actuator.o app/actuator.c
+actuator_pipes: rebuild
+	$(CC) $(CFLAGS) -o $(BUILD_APP_DIR)/actuator_pipes.o app/actuator_pipes.c
+	@$(MAKE) --no-print-directory link
+
+actuator_sem: rebuild
+	$(CC) $(CFLAGS) -o $(BUILD_APP_DIR)/actuator_sem.o app/actuator_sem.c
 	@$(MAKE) --no-print-directory link
 
 # clean and rebuild rules

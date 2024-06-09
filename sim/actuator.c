@@ -5,6 +5,8 @@
 #include <time.h>
 
 pthread_t threads[5];
+const int msec_min = 10;
+const int msec_max = 50;
 
 /* Binary Semaphores:
  *	s_luminosity_adc: locks task_head until luminosity_adc gets 
@@ -30,7 +32,7 @@ pthread_t threads[5];
 sem_t s_luminosity_adc, s_temperature_adc, s_luminosity_pwm, s_temperature_pwm, s_adc, s_pwm;
 
 void *task_head(void *arg) {
-	const int msec = 200 + (rand() % 800); // [200 ; 1000] ms
+	const int msec = msec_min + (rand() % msec_max); // [msec_min ; msec_max] ms
 	struct timespec ts = { .tv_sec = msec / 1000, .tv_nsec = (msec % 1000) * 1000000 };
 
 	while(1) {
@@ -53,7 +55,7 @@ void *task_head(void *arg) {
 };
 
 void *luminosity_adc(void *arg) {
-	const int msec = 200 + (rand() % 800); // [200 ; 1000] ms
+	const int msec = msec_min + (rand() % msec_max);
 	struct timespec ts = { .tv_sec = msec / 1000, .tv_nsec = (msec % 1000) * 1000000 };
 
 	while(1) {
@@ -70,7 +72,7 @@ void *luminosity_adc(void *arg) {
 };
 
 void *temperature_adc(void *arg) {
-	const int msec = 200 + (rand() % 800); // [200 ; 1000] ms
+	const int msec = msec_min + (rand() % msec_max);
 	struct timespec ts = { .tv_sec = msec / 1000, .tv_nsec = (msec % 1000) * 1000000 };
 	
 	while(1) {
@@ -87,7 +89,7 @@ void *temperature_adc(void *arg) {
 };
 
 void *luminosity_pwm(void *arg) {
-	const int msec = 200 + (rand() % 800); // [200 ; 1000] ms
+	const int msec = msec_min + (rand() % msec_max);
 	struct timespec ts = { .tv_sec = msec / 1000, .tv_nsec = (msec % 1000) * 1000000 };
 
 	while(1) { 
@@ -104,7 +106,7 @@ void *luminosity_pwm(void *arg) {
 };
 
 void *temperature_pwm(void *arg) {
-	const int msec = 200 + (rand() % 800); // [200 ; 1000] ms
+	const int msec = msec_min + (rand() % msec_max);
 	struct timespec ts = { .tv_sec = msec / 1000, .tv_nsec = (msec % 1000) * 1000000 };
 	
 	while(1) {
