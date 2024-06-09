@@ -135,15 +135,13 @@ uint16_t adc_read()
 /* sensor aquisition functions */
 float temperature()
 {
-	float temp = 0.0;
 	float voltage = 0.0;
 
 	for (int i = 0; i < ADC_SAMPLES; i++) {
-		voltage = adc_read() * (V_RAIL / ADC_MAX);
-		temp += (TV_RATIO * voltage);
+		voltage += adc_read() * (V_RAIL / ADC_MAX);
 	}
 
-	return (temp / ADC_SAMPLES);
+	return ((TV_RATIO * voltage) / ADC_SAMPLES);
 }
 
 float luminosity()
@@ -166,30 +164,34 @@ void task_head(void)
 	char data_temperature[64];
 
 	while (1) {
+
+		/* Luminosity Data Transmission Through Pipes */
 		if(ucx_pipe_size(luminosity_pipe_from_adc) > 0) {
 			ucx_pipe_read(luminosity_pipe_from_adc, data_luminosity, ucx_pipe_size(luminosity_pipe_from_adc));
-
+			
 			ucx_pipe_write(luminosity_pipe_to_pwm, data_luminosity, strlen((char *) data_luminosity) + 1);
-
 		};
+		
+		/* Temperature Data Transmission Through Pipes */
 		if(ucx_pipe_size(temperature_pipe_from_adc) > 0) {
 			ucx_pipe_read(temperature_pipe_from_adc, data_temperature, ucx_pipe_size(temperature_pipe_from_adc));
 
-			ucx_pipe_write(temperature_pipe_to_pwm, data_temperature, strlen((char *) data_temperature) + 1);
-		
+			ucx_pipe_write(temperature_pipe_to_pwm, data_temperature, strlen((char *) data_temperature) + 1);	
 		}
+		
+		/* Logging */
+		printf("temp: %s\n", data_temperature);
+		printf("lux: %s\n", data_luminosity);
 	}	
 }
 
 /* ADC - Temperature */
 void task_temperature_adc(void)
 {
-	float f;
-	char fval[50];
+	float f = 0.0;
 	char data[64];
 	
 	while (1) {
-		/* critical section: ADC is shared! */
 		ucx_sem_wait(adc_mtx);
 		adc_channel(ADC_Channel_8);
 		f = temperature();
@@ -197,10 +199,7 @@ void task_temperature_adc(void)
 	
 		ftoa(f, data, 6);
 		ucx_pipe_write(temperature_pipe_from_adc, data, strlen((char *) data) + 1);
-
-		ftoa(f, fval, 6);
-		printf("temp: %s\n", fval);
-		
+	
 		ucx_task_delay(capture_delay_us);
 	}
 }
@@ -208,12 +207,10 @@ void task_temperature_adc(void)
 /* ADC - Luminosity */
 void task_luminosity_adc(void)
 {
-	float f;
-	char fval[50];
+	float f = 0.0;
 	char data[64];
 
 	while (1) {
-		/* critical section: ADC is shared! */
 		ucx_sem_wait(adc_mtx);
 		adc_channel(ADC_Channel_9);
 		f = luminosity();
@@ -221,9 +218,6 @@ void task_luminosity_adc(void)
 		
 		ftoa(f, data, 6);
 		ucx_pipe_write(luminosity_pipe_from_adc, data, strlen((char *) data) + 1);
-		
-		ftoa(f, fval, 6);
-		// printf("lux: %s\n", fval);
 
 		ucx_task_delay(capture_delay_us);
 	}
@@ -233,7 +227,6 @@ void task_luminosity_adc(void)
 void task_temperature_pwm(void)
 {
 	char data[64];
-	char temperature_val[50];
 	float temperature = 0.0;
 	
 	while (1) {
@@ -241,10 +234,7 @@ void task_temperature_pwm(void)
 
 		ucx_pipe_read(temperature_pipe_to_pwm, data, ucx_pipe_size(temperature_pipe_to_pwm));
 		
-		temperature = (atof(data) / 40) * 1000;
-		
-		ftoa(temperature, temperature_val, 6);
-		// printf("temperature: %s\n", temperature_val);
+		temperature = (atof(data) / 40) * 1000;	
 		
 		ucx_sem_wait(pwm_mtx);
 		if(temperature <= 0) TIM5->CCR1 = 0;
@@ -258,7 +248,6 @@ void task_temperature_pwm(void)
 void task_luminosity_pwm(void)
 {
 	char data[64];
-	char luminosity_val[50];
 	float luminosity = 0.0;
 
 	while (1) {
@@ -266,13 +255,9 @@ void task_luminosity_pwm(void)
 
 		ucx_pipe_read(luminosity_pipe_to_pwm, data, ucx_pipe_size(luminosity_pipe_to_pwm));
 		
-		ucx_sem_wait(pwm_mtx);
-		
 		luminosity = (1 - (atof(data) / 100)) * 1000;
 		
-		ftoa(luminosity, luminosity_val, 6);
-		// printf("luminosity: %s\n", luminosity_val);
-
+		ucx_sem_wait(pwm_mtx);
 		if(luminosity <= 100) TIM5->CCR2 = 0;
 		else if(luminosity >= 900) TIM5->CCR2 = 999;
 		else TIM5->CCR2 = luminosity;
